@@ -1,0 +1,155 @@
+import requests
+from bs4 import BeautifulSoup
+import re
+import time
+import random
+import pandas as pd
+import datetime
+
+# Путь к Excel файлу
+excel_file = "C:/Users/User/Desktop/тест.xlsx"
+
+# Читаем ссылки из Excel файла
+try:
+    df = pd.read_excel(excel_file)
+    urls = df.iloc[:, 0].dropna().tolist()  # Убираем пустые строки
+except Exception as e:
+    print(f"Ошибка при чтении Excel файла: {e}")
+    exit()
+
+# Заголовки для маскировки под браузер
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
+# Колонки для итоговой таблицы
+columns = [
+    "Ссылка", "Дата регистрации", "Юридический адрес", "Адрес", "Телефоны",
+    "Электронная почта и сайт", "Генеральный директор", "Учредитель 1", "Учредитель 2",
+    "Количество контрактов", "Сумма контрактов", "Количество арбитражных дел (истец)",
+    "Количество арбитражных дел (ответчик)", "Виды деятельности"
+]
+
+# Список для хранения данных
+data = []
+
+# Функция для преобразования даты в стандартный формат
+def format_date(date_str):
+    months = {
+        "января": "01", "февраля": "02", "марта": "03", "апреля": "04",
+        "мая": "05", "июня": "06", "июля": "07", "августа": "08",
+        "сентября": "09", "октября": "10", "ноября": "11", "декабря": "12"
+    }
+    try:
+        date_str = date_str.replace("года", "").strip()
+        day, month_str, year = date_str.split()
+        month = months.get(month_str.lower(), "01")
+        return datetime.date(int(year), int(month), int(day)).strftime("%Y-%m-%d")
+    except Exception:
+        return "Неверная дата"
+
+# Функция для парсинга страницы
+def parse_page(url):
+    try:
+        print(f"Парсинг ссылки: {url}")
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return [url] + ["Ошибка при загрузке"] * (len(columns) - 1)
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Извлечение данных с учетом возможных отсутствий
+        registration_date = soup.select_one(
+            "#top > div > div.row.gy-2.gx-4 > div:nth-child(1) > div:nth-child(3) > div:nth-child(2)"
+        )
+        registration_date = format_date(registration_date.get_text(strip=True)) if registration_date else "Дата регистрации не найдена"
+
+        legal_address = soup.select_one("#copy-address")
+        legal_address = legal_address.get_text(strip=True) if legal_address else "Юридический адрес не найден"
+
+        contact_address = soup.select_one("#contacts > div:nth-child(3)")
+        contact_address = contact_address.get_text(strip=True) if contact_address else "Адрес не найден"
+
+        phones = soup.select_one("#contacts > div.row.gy-3.gx-4.mt-1 > div:nth-child(1)")
+        if phones:
+            phones = phones.get_text(strip=True)
+            phones = phones.replace("Телефоны", "").replace("Телефон—", "").strip()
+        else:
+            phones = "Телефоны не найдены"
+
+        email_and_website = soup.select_one("#contacts > div.row.gy-3.gx-4.mt-1 > div:nth-child(2)")
+        if email_and_website:
+            email_and_website = email_and_website.get_text(strip=True)
+            email_and_website = email_and_website.replace("Электронная почта", "").replace("Веб-сайт—", "").strip()
+        else:
+            email_and_website = "Электронная почта и сайт не найдены"
+
+        director_name = soup.select_one(
+            "#management > div > div.col-12.col-xl-6.col-xxl-4 > div > div.flex-grow-1.ms-3 > a"
+        )
+        director_name = director_name.get_text(strip=True) if director_name else "Генеральный директор не найден"
+
+        # Обработка учредителей
+        founders = []
+        founders_table = soup.select_one("#founders-tab-1 > table")
+        if founders_table:
+            rows = founders_table.find_all("tr")
+            for row in rows:
+                cells = row.find_all("td")
+                if len(cells) > 1:
+                    founder_name = re.search(r'([А-Яа-яЁё]+(?: [А-Яа-яЁё]+){1,2})', cells[1].get_text(strip=True))
+                    if founder_name:
+                        founders.append(founder_name.group(1))
+        founders = (founders + ["", ""])[:2]  # Гарантируем два поля
+
+        contracts_count = soup.select_one(
+            "#contracts > div.row.gy-3.gx-4.mb-4 > div.col-12.col-md-6.col-xxl-8.border-md-start > div.mt-2"
+        )
+        contracts_count = contracts_count.get_text(strip=True) if contracts_count else "Количество контрактов не найдено"
+
+        contracts_sum = soup.select_one(
+            "#contracts > div.row.gy-3.gx-4.mb-4 > div.col-12.col-md-6.col-xxl-8.border-md-start > div.text-huge"
+        )
+        contracts_sum = contracts_sum.get_text(strip=True) if contracts_sum else "Сумма контрактов не найдена"
+
+        plaintiff_count = soup.select_one(
+            "#legal-cases > div.row.gy-3.gx-4.mb-4 > div.col-12.col-md-6.col-xxl-4 > div.text-huge > a"
+        )
+        plaintiff_count = plaintiff_count.get_text(strip=True) if plaintiff_count else "Арбитражные дела (истец) не найдены"
+
+        defendant_count = soup.select_one(
+            "#legal-cases > div.row.gy-3.gx-4.mb-4 > div.col-12.col-md-6.col-xxl-8.border-md-start > div.text-huge > a"
+        )
+        defendant_count = defendant_count.get_text(strip=True) if defendant_count else "Арбитражные дела (ответчик) не найдены"
+
+        activity = soup.select_one("#top > div > div.row.gy-2.gx-4 > div:nth-child(1) > div:nth-child(4) > div:nth-child(2) > a")
+        activity = activity.get_text(strip=True) if activity else "Виды деятельности не найдены"
+
+        # Формируем строку данных
+        return [
+            url, registration_date, legal_address, contact_address, phones,
+            email_and_website, director_name, founders[0], founders[1],
+            contracts_count, contracts_sum, plaintiff_count, defendant_count, activity
+        ]
+    except Exception as e:
+        print(f"Ошибка при обработке {url}: {e}")
+        return [url] + ["Ошибка"] * (len(columns) - 1)
+
+# Цикл по всем ссылкам
+for url in urls:
+    if isinstance(url, str) and url.startswith("http"):
+        data.append(parse_page(url))
+        time.sleep(random.uniform(5, 7))
+    else:
+        data.append([url] + ["Некорректная ссылка"] * (len(columns) - 1))
+
+# Создание итоговой таблицы
+result_df = pd.DataFrame(data, columns=columns)
+
+# Сохранение в Excel
+try:
+    result_df.to_excel(excel_file, index=False)
+    print("Данные успешно сохранены в файл Excel.")
+except Exception as e:
+    print(f"Ошибка при сохранении файла: {e}")
