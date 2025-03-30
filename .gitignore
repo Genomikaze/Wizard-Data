@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.xlsx
+parser.log
+service_account.json
+.env
