@@ -1,0 +1,8 @@
+requests
+beautifulsoup4
+lxml
+pandas
+gspread
+oauth2client
+python-telegram-bot
+openpyxl
